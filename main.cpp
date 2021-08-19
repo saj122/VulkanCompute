@@ -80,7 +80,18 @@ class VulkanCompute
 
         void cleanUp()
         {
+            for(auto& pipeline : _computePipelines)
+            {
+                vkDestroyPipeline(_device, pipeline, nullptr);
+            }
+
+            vkDestroyDescriptorSetLayout(_device, _computeDescriptorSetLayout, nullptr);
+
+            vkDestroyCommandPool(_device, _computeCommandPool, nullptr);
+            
             vkDestroyPipelineLayout(_device, _pipelineLayout, nullptr);
+
+            vkDestroyPipelineCache(_device, _pipelineCache, nullptr);
 
             vkDestroyDevice(_device, nullptr);
 
@@ -144,7 +155,7 @@ class VulkanCompute
 
         void createComputePipeline()
         {
-            auto computeShaderCode = readFile("../shaders/comp.spv");
+            auto computeShaderCode = readFile("../shaders/edgedetect.comp.spv");
 
             VkShaderModule computeShaderModule = createShaderModule(computeShaderCode);
 
@@ -156,17 +167,80 @@ class VulkanCompute
 
             VkPipelineShaderStageCreateInfo shaderStages[] = { compShaderStageInfo };
 
-			VkPipelineCreateFlags flags = 0;
-		
+            VkDescriptorSetLayoutBinding setLayoutBinding {};
+            setLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            setLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+            setLayoutBinding.binding = 0;
+            setLayoutBinding.descriptorCount = 1;
+            
+            VkDescriptorSetLayoutBinding setLayoutBinding2 {};
+            setLayoutBinding2.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            setLayoutBinding2.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+            setLayoutBinding2.binding = 1;
+            setLayoutBinding2.descriptorCount = 1;
+
+			std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings;
+            setLayoutBindings.reserve(2);
+
+            setLayoutBindings.push_back(setLayoutBinding);
+            setLayoutBindings.push_back(setLayoutBinding2);
+
+            VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+			descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+			descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
+			descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
+		    if(vkCreateDescriptorSetLayout(_device,	&descriptorSetLayoutCreateInfo, nullptr, &_computeDescriptorSetLayout) != VK_SUCCESS)
+            {
+                throw std::runtime_error("Failed to create descriptor set layout.");
+            }
+
 			VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
             pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
             pipelineLayoutInfo.setLayoutCount = 0;
+            pipelineLayoutInfo.pSetLayouts = 0;
             pipelineLayoutInfo.pushConstantRangeCount = 0;
             
             if (vkCreatePipelineLayout(_device, &pipelineLayoutInfo, nullptr, &_pipelineLayout) != VK_SUCCESS) 
             {
                 throw std::runtime_error("Failed to create pipeline layout.");
             }
+
+            VkComputePipelineCreateInfo pipelineInfo{};
+            pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+            pipelineInfo.layout = _pipelineLayout;
+            pipelineInfo.flags = 0;
+
+            VkPipelineCacheCreateInfo pipelineCacheCreateInfo = {};
+            pipelineCacheCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+            if(vkCreatePipelineCache(_device, &pipelineCacheCreateInfo, nullptr, &_pipelineCache) != VK_SUCCESS)
+            {
+                throw std::runtime_error("Failed to create pipeline cache.");
+            }
+
+            _shaderNames = { "edgedetect" };
+            for(auto& shaderName : _shaderNames)
+            {
+			    pipelineInfo.stage = compShaderStageInfo;
+			    VkPipeline pipeline;
+			    if(vkCreateComputePipelines(_device, _pipelineCache, 1, &pipelineInfo, nullptr, &pipeline) != VK_SUCCESS)
+                {
+                    throw std::runtime_error("Failed to create compute pipeplines.");
+                }
+
+                _computePipelines.push_back(pipeline);
+            } 
+
+            QueueFamilyIndices indices = findQueueFamilies(_physicalDevice);
+
+            VkCommandPoolCreateInfo cmdPoolInfo = {};
+            cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+            cmdPoolInfo.queueFamilyIndex =  indices.computeFamily.value();
+            cmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+            if(vkCreateCommandPool(_device, &cmdPoolInfo, nullptr, &_computeCommandPool) != VK_SUCCESS)
+            {
+                throw std::runtime_error("Failed to create compute command pool.");
+            }
+
             vkDestroyShaderModule(_device, computeShaderModule, nullptr);
         }
 
@@ -378,6 +452,12 @@ class VulkanCompute
         VkDevice _device;
         VkQueue _computeQueue;
         VkPipelineLayout _pipelineLayout;
+        VkDescriptorSetLayout _computeDescriptorSetLayout;
+        VkPipelineCache _pipelineCache;
+        VkCommandPool _computeCommandPool;
+
+        std::vector<VkPipeline> _computePipelines;
+        std::vector<std::string> _shaderNames;
 };
 
 int main(int argc, char** argv)
