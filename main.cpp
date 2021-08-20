@@ -76,14 +76,13 @@ class VulkanCompute
             pickPhysicalDevice();
             createLogicalDevice();
             createComputePipeline();
+            createCommandPool();
         }
 
         void cleanUp()
         {
-            for(auto& pipeline : _computePipelines)
-            {
-                vkDestroyPipeline(_device, pipeline, nullptr);
-            }
+
+            vkDestroyPipeline(_device, _computePipeline, nullptr);
 
             vkDestroyDescriptorSetLayout(_device, _computeDescriptorSetLayout, nullptr);
 
@@ -153,6 +152,56 @@ class VulkanCompute
             }   
         }
 
+        void createCommandPool()
+        {
+            QueueFamilyIndices indices = findQueueFamilies(_physicalDevice);
+
+            VkCommandPoolCreateInfo cmdPoolInfo = {};
+            cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+            cmdPoolInfo.queueFamilyIndex =  indices.computeFamily.value();
+            cmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+            if(vkCreateCommandPool(_device, &cmdPoolInfo, nullptr, &_computeCommandPool) != VK_SUCCESS)
+            {
+                throw std::runtime_error("Failed to create compute command pool.");
+            }
+        }
+
+        void createCommandBuffers()
+        {
+
+            VkCommandBufferAllocateInfo allocInfo{};
+            allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+            allocInfo.commandPool = _computeCommandPool;
+            allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+            allocInfo.commandBufferCount = (uint32_t) _commandBuffers.size();
+
+            if (vkAllocateCommandBuffers(_device, &allocInfo, _commandBuffers.data()) != VK_SUCCESS) 
+            {
+                throw std::runtime_error("Failed to allocate command buffers.");
+            }
+
+            for (size_t i = 0; i < _commandBuffers.size(); i++) 
+            {
+                vkQueueWaitIdle(_computeQueue);
+
+                VkCommandBufferBeginInfo cmdBufferBeginInfo {};
+			    cmdBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+                if(vkBeginCommandBuffer(_commandBuffers[i], &cmdBufferBeginInfo))
+                {
+                    throw std::runtime_error("Failed to record command buffer.")
+                }
+
+                vkCmdBindPipeline(_commandBuffers[i], VK_PIPELINE_BIND_POINT_COMPUTE, _computePipeline);
+                vkCmdBindDescriptorSets(_commandBuffers[i], VK_PIPELINE_BIND_POINT_COMPUTE, _pipelineLayout, 0, 1, _computeDescriptorSet, 0, 0);
+
+                if (vkEndCommandBuffer(_commandBuffers[i]) != VK_SUCCESS) 
+                {
+                    throw std::runtime_error("Failed to record command buffer.");
+                }
+            }
+        }
+
         void createComputePipeline()
         {
             auto computeShaderCode = readFile("../shaders/edgedetect.comp.spv");
@@ -205,6 +254,33 @@ class VulkanCompute
                 throw std::runtime_error("Failed to create pipeline layout.");
             }
 
+            VkDescriptorSetAllocateInfo descriptorSetAllocateInfo {};
+			descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			descriptorSetAllocateInfo.descriptorPool = _computeDescriptorPool;
+			descriptorSetAllocateInfo.pSetLayouts = &_computeDescriptorSetLayout;
+			descriptorSetAllocateInfo.descriptorSetCount = 1;
+
+            if(vkAllocateDescriptorSets(_device, &descriptorSetAllocateInfo, &_computeDescriptorSet) != VK_SUCCESS)
+            {
+                throw std::runtime_error("Failed to allocate descriptor set.");
+            }
+
+            VkWriteDescriptorSet writeDescriptorSet {};
+			writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writeDescriptorSet.dstSet = _computeDescriptorSet;
+			writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+			writeDescriptorSet.dstBinding = 0;
+			writeDescriptorSet.pImageInfo = &_imageDescriptor;
+			writeDescriptorSet.descriptorCount = 1;
+
+            VkWriteDescriptorSet writeDescriptorSet2 {};
+			writeDescriptorSet2.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writeDescriptorSet2.dstSet = _computeDescriptorSet;
+			writeDescriptorSet2.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+			writeDescriptorSet2.dstBinding = 1;
+			writeDescriptorSet2.pImageInfo = &_targetDescriptor;
+			writeDescriptorSet2.descriptorCount = 1;
+
             VkComputePipelineCreateInfo pipelineInfo{};
             pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
             pipelineInfo.layout = _pipelineLayout;
@@ -217,28 +293,10 @@ class VulkanCompute
                 throw std::runtime_error("Failed to create pipeline cache.");
             }
 
-            _shaderNames = { "edgedetect" };
-            for(auto& shaderName : _shaderNames)
+            pipelineInfo.stage = compShaderStageInfo;
+            if(vkCreateComputePipelines(_device, _pipelineCache, 1, &pipelineInfo, nullptr, &_computePipeline) != VK_SUCCESS)
             {
-			    pipelineInfo.stage = compShaderStageInfo;
-			    VkPipeline pipeline;
-			    if(vkCreateComputePipelines(_device, _pipelineCache, 1, &pipelineInfo, nullptr, &pipeline) != VK_SUCCESS)
-                {
-                    throw std::runtime_error("Failed to create compute pipeplines.");
-                }
-
-                _computePipelines.push_back(pipeline);
-            } 
-
-            QueueFamilyIndices indices = findQueueFamilies(_physicalDevice);
-
-            VkCommandPoolCreateInfo cmdPoolInfo = {};
-            cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-            cmdPoolInfo.queueFamilyIndex =  indices.computeFamily.value();
-            cmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-            if(vkCreateCommandPool(_device, &cmdPoolInfo, nullptr, &_computeCommandPool) != VK_SUCCESS)
-            {
-                throw std::runtime_error("Failed to create compute command pool.");
+                throw std::runtime_error("Failed to create compute pipeline.");
             }
 
             vkDestroyShaderModule(_device, computeShaderModule, nullptr);
@@ -455,9 +513,14 @@ class VulkanCompute
         VkDescriptorSetLayout _computeDescriptorSetLayout;
         VkPipelineCache _pipelineCache;
         VkCommandPool _computeCommandPool;
+        VkDescriptorPool _computeDescriptorPool;
+        VkDescriptorSet _computeDescriptorSet;
+        VkDescriptorImageInfo _imageDescriptor;
+        VkDescriptorImageInfo _targetDescriptor;
 
-        std::vector<VkPipeline> _computePipelines;
+        VkPipeline _computePipeline;
         std::vector<std::string> _shaderNames;
+        std::vector<VkCommandBuffer> _commandBuffers;
 };
 
 int main(int argc, char** argv)
