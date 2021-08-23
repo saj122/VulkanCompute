@@ -13,9 +13,13 @@ find_package(Vulkan REQUIRED)
 
 IF(WIN32)
 	add_definitions(-DVK_USE_PLATFORM_WIN32_KHR)
+	add_definitions(-DVK_KHR_SURFACE_EXTENSION_NAME)
+	add_definitions(-DVK_KHR_WIN32_SURFACE_EXTENSION_NAME)
 ELSE()
 	find_package(X11 REQUIRED)
 	link_libraries(${X11_LIBRARIES})
+	add_definitions(-DVK_KHR_SURFACE_EXTENSION_NAME)
+	add_definitions(-DVK_KHR_XLIB_SURFACE_EXTENSION_NAME)
 	add_definitions(-DVK_USE_PLATFORM_XLIB_KHR)
 ENDIF()
 
