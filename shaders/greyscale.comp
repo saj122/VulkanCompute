@@ -7,7 +7,7 @@ layout (binding = 1, rgba8) uniform image2D resultImage;
 void main() 
 {
     vec4 rgba = imageLoad(inputImage, ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y)).rgba;
-    float res = rgba.r*0.299 + rgba.g*0.587 + rgba.b*0.114;
-    vec4 col = vec4(res,res,res,rgba.a);
+    float grey = rgba.r*0.299+rgba.g*0.587+rgba.b*0.114;
+    vec4 col = vec4(grey, grey, grey, rgba.a);
     imageStore(resultImage, ivec2(gl_GlobalInvocationID.xy), col);
 }
